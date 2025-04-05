@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,15 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				crypto: {
+					'blue': '#3772FF',
+					'green': '#45B36B',
+					'red': '#EB5757',
+					'purple': '#8B5CF6',
+					'dark': '#1A1F2C',
+					'light-blue': '#58A6FF',
+					'yellow': '#F0B90B'
 				}
 			},
 			borderRadius: {
@@ -84,11 +94,31 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'pulse-light': {
+					'0%, 100%': { opacity: '1' },
+					'50%': { opacity: '0.6' }
+				},
+				'countdown': {
+					'0%': { transform: 'scale(1)' },
+					'50%': { transform: 'scale(1.05)' },
+					'100%': { transform: 'scale(1)' }
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'pulse-light': 'pulse-light 1.5s ease-in-out infinite',
+				'countdown': 'countdown 1s ease-in-out infinite'
+			},
+			boxShadow: {
+				'glow': '0 0 10px rgba(139, 92, 246, 0.5)',
+				'glow-green': '0 0 10px rgba(69, 179, 107, 0.5)',
+				'glow-red': '0 0 10px rgba(235, 87, 87, 0.5)'
+			},
+			backgroundImage: {
+				'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+				'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))'
 			}
 		}
 	},
