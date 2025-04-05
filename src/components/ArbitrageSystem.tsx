@@ -9,6 +9,9 @@ import WalletStatus from './WalletStatus';
 import ArbitrageStats from './ArbitrageStats';
 import ProfitChart from './ProfitChart';
 import ExchangeRates from './ExchangeRates';
+import AmountSelector from './AmountSelector';
+import ArbitrageDetailsModal from './ArbitrageDetailsModal';
+import ArbitrageOpportunities from './ArbitrageOpportunities';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -44,6 +47,14 @@ interface ExchangeRate {
   change24h: number;
 }
 
+interface ArbitrageOpportunity {
+  id: string;
+  route: string;
+  profit: number;
+  timestamp: string;
+  type: 'normal' | 'triangular' | 'hot';
+}
+
 const ArbitrageSystem: React.FC = () => {
   // System states
   const [isRunning, setIsRunning] = useState(false);
@@ -55,6 +66,10 @@ const ArbitrageSystem: React.FC = () => {
   const [provider, setProvider] = useState<ethers.providers.Web3Provider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [currentArbitrageType, setCurrentArbitrageType] = useState<ArbitrageType>(null);
+  const [selectedAmount, setSelectedAmount] = useState(100); // Default trade amount
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedOpportunity, setSelectedOpportunity] = useState<ArbitrageOpportunity | null>(null);
+  const [opportunityFilterType, setOpportunityFilterType] = useState('all'); // 'all', 'normal', 'triangular', 'hot'
   
   // Stats
   const [totalTransactions, setTotalTransactions] = useState(0);
@@ -65,6 +80,7 @@ const ArbitrageSystem: React.FC = () => {
   // Exchange rates
   const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([]);
   const [chartData, setChartData] = useState<{ timestamp: string; profit: number }[]>([]);
+  const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([]);
   
   // Contract instance
   const [arbitrageContract, setArbitrageContract] = useState<ethers.Contract | null>(null);
@@ -175,7 +191,7 @@ const ArbitrageSystem: React.FC = () => {
     
     try {
       setCurrentArbitrageType('normal');
-      const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
+      const sellAmount = ethers.utils.parseUnits(selectedAmount.toString(), 6); // Convert to USDC decimals
       const sellToken = POLYGON_USDC;
       const buyToken = POLYGON_USDT;
 
@@ -202,7 +218,7 @@ const ArbitrageSystem: React.FC = () => {
     try {
       setCurrentArbitrageType('triangular');
       // USDC -> WMATIC -> USDT -> USDC
-      const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
+      const sellAmount = ethers.utils.parseUnits(selectedAmount.toString(), 6); // Convert to USDC decimals
       
       toast.info("Buscando cotações para arbitragem triangular...");
       
@@ -262,7 +278,7 @@ const ArbitrageSystem: React.FC = () => {
     
     try {
       setCurrentArbitrageType('hot');
-      const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
+      const sellAmount = ethers.utils.parseUnits(selectedAmount.toString(), 6); // Convert to USDC decimals
       const sellToken = POLYGON_USDC;
       const buyToken = POLYGON_USDT;
 
@@ -407,7 +423,7 @@ const ArbitrageSystem: React.FC = () => {
       toast.error("Erro durante o processo de arbitragem");
       setCurrentArbitrageType(null);
     }
-  }, [isRunning, arbitrageContract, signer, successRate, totalTransactions, averageProfit]);
+  }, [isRunning, arbitrageContract, signer, successRate, totalTransactions, averageProfit, selectedAmount]);
 
   // Handle arbitrage completion
   const handleArbitrageComplete = useCallback(() => {
@@ -416,7 +432,7 @@ const ArbitrageSystem: React.FC = () => {
     }
   }, [isRunning, executeBestArbitrage]);
 
-  // Update exchange rates
+  // Update exchange rates and generate mock opportunities
   const fetchExchangeRates = useCallback(async () => {
     // In a real application, you would fetch actual rates from exchanges
     // For now, we'll simulate with semi-realistic data
@@ -428,7 +444,55 @@ const ArbitrageSystem: React.FC = () => {
       { exchange: 'Huobi', symbol: 'USDC/USDT', price: 0.9999 + (Math.random() * 0.0004), change24h: -0.01 + (Math.random() * 0.14) },
       { exchange: '0x API', symbol: 'USDC/USDT', price: 1.0001 + (Math.random() * 0.0003), change24h: 0.02 + (Math.random() * 0.16) - 0.08 }
     ];
+    
+    // Generate mock opportunities based on the references provided
+    const mockOpportunities: ArbitrageOpportunity[] = [
+      {
+        id: '1',
+        route: 'DOT → LINK → BNB → DOT',
+        profit: 7.29,
+        timestamp: '08:55:31',
+        type: 'triangular'
+      },
+      {
+        id: '2',
+        route: 'CAKE → BUSD → BNB → CAKE',
+        profit: 5.13,
+        timestamp: '08:55:55',
+        type: 'triangular'
+      },
+      {
+        id: '3',
+        route: 'USDT → LINK → ETH → USDT',
+        profit: 4.96,
+        timestamp: '08:55:33',
+        type: 'normal'
+      },
+      {
+        id: '4',
+        route: 'ETH → LINK → USDT → ETH',
+        profit: 7.87,
+        timestamp: '08:55:24',
+        type: 'hot'
+      },
+      {
+        id: '5',
+        route: 'ETH → LINK → BUSD → ETH',
+        profit: 7.82,
+        timestamp: '08:55:24',
+        type: 'triangular'
+      },
+      {
+        id: '6',
+        route: 'LINK → BUSD → XRP → LINK',
+        profit: 7.31,
+        timestamp: '08:56:56',
+        type: 'triangular'
+      }
+    ];
+    
     setExchangeRates(mockExchangeRates);
+    setOpportunities(mockOpportunities);
   }, []);
 
   // Re-fetch exchange rates periodically
@@ -443,6 +507,44 @@ const ArbitrageSystem: React.FC = () => {
     console.log(`Rota de arbitragem selecionada: ${fromExchange} -> ${toExchange}`);
     toast.info(`Rota de arbitragem: ${fromExchange} -> ${toExchange}`);
     // In a real app, this would calculate and display the potential profit
+  };
+
+  // Handle opening details modal for an opportunity
+  const handleOpenDetails = (opportunity: ArbitrageOpportunity) => {
+    setSelectedOpportunity(opportunity);
+    setDetailsModalOpen(true);
+  };
+
+  // Calculate profit details based on selected opportunity and amount
+  const getProfitDetails = useCallback((profit: number) => {
+    const grossProfit = profit;
+    const gasFees = 0.3; // Mock gas fee
+    const otherFees = 0.2; // Other fees
+    const totalFees = gasFees + otherFees;
+    const netProfit = grossProfit - totalFees;
+    
+    return {
+      grossProfit,
+      gasFees,
+      totalFees,
+      netProfit
+    };
+  }, []);
+
+  // Execute selected arbitrage opportunity
+  const executeSelectedOpportunity = () => {
+    if (!selectedOpportunity) return;
+    
+    toast.success(`Executando arbitragem ${selectedOpportunity.type} com $${selectedAmount}...`);
+    setDetailsModalOpen(false);
+    
+    // In a real app, this would initiate the actual trade
+    setTimeout(() => {
+      const profitAmount = (selectedOpportunity.profit / 100) * selectedAmount;
+      setProfit(prev => prev + profitAmount);
+      setTotalTransactions(prev => prev + 1);
+      toast.success(`Arbitragem concluída! Lucro: $${profitAmount.toFixed(2)}`);
+    }, 2000);
   };
 
   // Refresh data
@@ -526,6 +628,14 @@ const ArbitrageSystem: React.FC = () => {
         />
       </div>
       
+      {/* Amount Selector */}
+      <div className="mb-6">
+        <AmountSelector 
+          selectedAmount={selectedAmount} 
+          onSelectAmount={setSelectedAmount} 
+        />
+      </div>
+      
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <ControlButton 
           icon={isRunning ? Pause : Play} 
@@ -557,13 +667,38 @@ const ArbitrageSystem: React.FC = () => {
         className="mb-6"
       />
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <ProfitChart data={chartData.length > 0 ? chartData : [{ timestamp: "00:00", profit: 0 }]} />
         <ExchangeRates 
           rates={exchangeRates} 
           onSelectArbitrage={handleSelectArbitrage}
         />
       </div>
+      
+      {/* Arbitrage Opportunities */}
+      <div className="mb-6">
+        <ArbitrageOpportunities 
+          opportunities={opportunities}
+          selectedType={opportunityFilterType}
+          onSelectType={setOpportunityFilterType}
+          onSelectOpportunity={handleOpenDetails}
+        />
+      </div>
+      
+      {/* Arbitrage Details Modal */}
+      {selectedOpportunity && (
+        <ArbitrageDetailsModal 
+          isOpen={detailsModalOpen}
+          onClose={() => setDetailsModalOpen(false)}
+          route={selectedOpportunity.route}
+          estimatedProfit={selectedOpportunity.profit}
+          investmentAmount={selectedAmount}
+          onExecute={executeSelectedOpportunity}
+          onValidate={() => toast.info("Validando arbitragem...")}
+          arbitrageType={selectedOpportunity.type as ArbitrageType}
+          profitDetails={getProfitDetails((selectedOpportunity.profit / 100) * selectedAmount)}
+        />
+      )}
     </div>
   );
 };
