@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
@@ -20,8 +19,9 @@ import { toast } from 'sonner';
 const contractAddress = "0x0000000000000000000000000000000000000000"; // Replace with your contract address
 const contractAbi = []; // Replace with your contract ABI
 
-// 0x API Config
+// 0x API Config - Updated to use the correct endpoint for v2
 const BASE_0X_URL = "https://api.0x.org/swap/permit2/quote";
+const API_KEY = ""; // Should be set via environment variable in production
 const tradeInterval = 5000;
 
 // Token Configuration
@@ -84,9 +84,6 @@ const ArbitrageSystem: React.FC = () => {
   
   // Contract instance
   const [arbitrageContract, setArbitrageContract] = useState<ethers.Contract | null>(null);
-
-  // 0x API key
-  const API_KEY = ""; // Should be set via environment variable in production
 
   // Get provider and signer
   const getProviderAndSigner = useCallback(async () => {
@@ -445,7 +442,7 @@ const ArbitrageSystem: React.FC = () => {
       { exchange: '0x API', symbol: 'USDC/USDT', price: 1.0001 + (Math.random() * 0.0003), change24h: 0.02 + (Math.random() * 0.16) - 0.08 }
     ];
     
-    // Generate mock opportunities based on the references provided
+    // Generate mock opportunities with the requested color coding by type
     const mockOpportunities: ArbitrageOpportunity[] = [
       {
         id: '1',
@@ -487,7 +484,7 @@ const ArbitrageSystem: React.FC = () => {
         route: 'LINK → BUSD → XRP → LINK',
         profit: 7.31,
         timestamp: '08:56:56',
-        type: 'triangular'
+        type: 'hot'
       }
     ];
     
