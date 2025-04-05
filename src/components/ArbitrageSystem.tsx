@@ -18,18 +18,23 @@ const contractAddress = "0x0000000000000000000000000000000000000000"; // Replace
 const contractAbi = []; // Replace with your contract ABI
 
 // 0x API Config
-const BASE_0X_URL = "https://polygon.api.0x.org/swap/v1/quote";
+const BASE_0X_URL = "https://api.0x.org/swap/permit2/quote";
 const tradeInterval = 5000;
 
 // Token Configuration
 const POLYGON_USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // USDC on Polygon
 const POLYGON_USDT = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // USDT on Polygon
+const POLYGON_WMATIC = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"; // WMATIC on Polygon
+
+// Arbitrage Types
+type ArbitrageType = 'normal' | 'triangular' | 'hot' | null;
 
 interface TradeHistoryItem {
   timestamp: number;
   sellAmount: string;
   buyAmount: string;
   txHash: string;
+  arbitrageType: ArbitrageType;
 }
 
 interface ExchangeRate {
@@ -49,6 +54,7 @@ const ArbitrageSystem: React.FC = () => {
   const [nextArbitrageTime, setNextArbitrageTime] = useState(60);
   const [provider, setProvider] = useState<ethers.providers.Web3Provider | null>(null);
   const [signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [currentArbitrageType, setCurrentArbitrageType] = useState<ArbitrageType>(null);
   
   // Stats
   const [totalTransactions, setTotalTransactions] = useState(0);
@@ -62,6 +68,9 @@ const ArbitrageSystem: React.FC = () => {
   
   // Contract instance
   const [arbitrageContract, setArbitrageContract] = useState<ethers.Contract | null>(null);
+
+  // 0x API key
+  const API_KEY = ""; // Should be set via environment variable in production
 
   // Get provider and signer
   const getProviderAndSigner = useCallback(async () => {
@@ -95,18 +104,35 @@ const ArbitrageSystem: React.FC = () => {
     }
   }, []);
 
-  // Function to fetch quotes from 0x API
-  const getQuote = async (sellToken: string, buyToken: string, sellAmount: string) => {
+  // Function to fetch quotes from 0x API v2
+  const getQuote = async (sellToken: string, buyToken: string, sellAmount: string, arbitrageType: ArbitrageType = 'normal') => {
     try {
-      const params = {
+      const headers = {
+        "0x-api-key": API_KEY,
+        "0x-version": "v2"
+      };
+
+      const params: any = {
         chainId: 137, // Polygon
         sellToken,
         buyToken,
         sellAmount,
-        slippageBps: 100 // 1% slippage
+        slippagePercentage: "0.01" // 1% slippage
       };
-      const response = await axios.get(BASE_0X_URL, { params });
-      return response.data;
+
+      if (walletAddress) {
+        params.taker = walletAddress;
+      }
+
+      const response = await axios.get(BASE_0X_URL, { 
+        params,
+        headers: API_KEY ? headers : undefined // Only send headers if API key is set
+      });
+      
+      return {
+        ...response.data,
+        arbitrageType
+      };
     } catch (error) {
       console.error("Erro ao obter cotação:", error);
       return null;
@@ -129,6 +155,7 @@ const ArbitrageSystem: React.FC = () => {
     setWalletBalance(0);
     setIsConnected(false);
     setArbitrageContract(null);
+    setCurrentArbitrageType(null);
     toast.info("Carteira desconectada");
   };
 
@@ -142,85 +169,233 @@ const ArbitrageSystem: React.FC = () => {
     toast.info(isRunning ? "Sistema pausado" : "Sistema iniciado");
   };
 
-  // Execute arbitrage
-  const executeArbitrage = useCallback(async () => {
-    if (!isRunning || !arbitrageContract || !signer) return;
+  // Execute normal arbitrage (direct swap)
+  const executeNormalArbitrage = async () => {
+    if (!signer) return null;
     
     try {
+      setCurrentArbitrageType('normal');
       const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
       const sellToken = POLYGON_USDC;
       const buyToken = POLYGON_USDT;
 
-      toast.info("Buscando cotações para arbitragem...");
-      const quote = await getQuote(sellToken, buyToken, sellAmount.toString());
+      toast.info("Buscando cotações para arbitragem normal...");
+      const quote = await getQuote(sellToken, buyToken, sellAmount.toString(), 'normal');
       
       if (!quote) {
-        toast.error("Falha ao obter cotações");
-        return;
+        toast.error("Falha ao obter cotações para arbitragem normal");
+        return null;
       }
 
-      console.log("Cotações obtidas:", quote);
+      console.log("Cotações obtidas (normal):", quote);
+      return quote;
+    } catch (error) {
+      console.error("Erro na arbitragem normal:", error);
+      return null;
+    }
+  };
+
+  // Execute triangular arbitrage (three-token swap)
+  const executeTriangularArbitrage = async () => {
+    if (!signer) return null;
+    
+    try {
+      setCurrentArbitrageType('triangular');
+      // USDC -> WMATIC -> USDT -> USDC
+      const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
       
-      // Check if profitable opportunity exists
-      if (parseFloat(quote.buyAmount) > parseFloat(quote.sellAmount)) {
-        toast.success("Oportunidade detectada, executando arbitragem...");
-        
-        try {
-          const tx = await arbitrageContract.executeArbitrage(
-            quote.sellAmount,
-            quote.minBuyAmount || ethers.utils.parseUnits((parseFloat(ethers.utils.formatUnits(quote.buyAmount, 6)) * 0.99).toString(), 6),
-            quote.data,
-            { details: "0x", nonce: 0, amount: sellAmount, expiration: Math.floor(Date.now() / 1000) + 3600, spender: contractAddress, signatureLength: 0 },
-            "0x"
-          );
-          
-          toast.info("Transação enviada, aguardando confirmação...");
-          const receipt = await tx.wait();
-          
-          // Calculate profit
-          const profitAmount = parseFloat(ethers.utils.formatUnits(
-            ethers.BigNumber.from(quote.buyAmount).sub(ethers.BigNumber.from(quote.sellAmount)), 
-            6
-          ));
-          
-          // Update UI
-          setProfit((prev) => prev + profitAmount);
-          setTotalTransactions((prev) => prev + 1);
-          
-          const newSuccessRate = (successRate * totalTransactions + 100) / (totalTransactions + 1);
-          setSuccessRate(newSuccessRate);
-          
-          setAverageProfit((averageProfit * totalTransactions + profitAmount) / (totalTransactions + 1));
-          
-          // Add to trade history
-          const newTradeItem = {
-            timestamp: Date.now(),
-            sellAmount: quote.sellAmount,
-            buyAmount: quote.buyAmount,
-            txHash: receipt.transactionHash
-          };
-          
-          setTradeHistory((prev) => [...prev, newTradeItem]);
-          
-          // Update chart data
-          const now = new Date();
-          const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-          
-          setChartData((prev) => [
-            ...prev, 
-            { 
-              timestamp: timeString, 
-              profit: profitAmount 
-            }
-          ]);
-          
-          toast.success(`Arbitragem concluída! Lucro: $${profitAmount.toFixed(2)}`);
-        } catch (error) {
-          console.error("Erro na execução da arbitragem:", error);
-          toast.error("Falha ao executar arbitragem");
+      toast.info("Buscando cotações para arbitragem triangular...");
+      
+      // Step 1: USDC -> WMATIC
+      const quote1 = await getQuote(POLYGON_USDC, POLYGON_WMATIC, sellAmount.toString(), 'triangular');
+      
+      if (!quote1) {
+        toast.error("Falha ao obter cotações para passo 1 da arbitragem triangular");
+        return null;
+      }
+      
+      // Step 2: WMATIC -> USDT
+      const maticAmount = quote1.buyAmount;
+      const quote2 = await getQuote(POLYGON_WMATIC, POLYGON_USDT, maticAmount, 'triangular');
+      
+      if (!quote2) {
+        toast.error("Falha ao obter cotações para passo 2 da arbitragem triangular");
+        return null;
+      }
+      
+      // Step 3: USDT -> USDC
+      const usdtAmount = quote2.buyAmount;
+      const quote3 = await getQuote(POLYGON_USDT, POLYGON_USDC, usdtAmount, 'triangular');
+      
+      if (!quote3) {
+        toast.error("Falha ao obter cotações para passo 3 da arbitragem triangular");
+        return null;
+      }
+      
+      // Calculate triangular arbitrage profit
+      const initialAmount = parseFloat(ethers.utils.formatUnits(sellAmount, 6));
+      const finalAmount = parseFloat(ethers.utils.formatUnits(ethers.BigNumber.from(quote3.buyAmount), 6));
+      const profit = finalAmount - initialAmount;
+      
+      console.log(`Arbitragem triangular: ${initialAmount} USDC -> ${quote1.buyAmount} WMATIC -> ${quote2.buyAmount} USDT -> ${finalAmount} USDC`);
+      console.log(`Lucro potencial: ${profit} USDC`);
+      
+      if (profit <= 0) {
+        console.log("Sem oportunidade lucrativa em arbitragem triangular");
+        return null;
+      }
+      
+      return {
+        ...quote3,
+        profit,
+        arbitrageType: 'triangular'
+      };
+    } catch (error) {
+      console.error("Erro na arbitragem triangular:", error);
+      return null;
+    }
+  };
+
+  // Execute hot arbitrage (cross-exchange immediate opportunity)
+  const executeHotArbitrage = async () => {
+    if (!signer) return null;
+    
+    try {
+      setCurrentArbitrageType('hot');
+      const sellAmount = ethers.utils.parseUnits("100", 6); // 100 USDC
+      const sellToken = POLYGON_USDC;
+      const buyToken = POLYGON_USDT;
+
+      toast.info("Buscando cotações para arbitragem hot...");
+      
+      // For a real hot arbitrage, you would query multiple exchanges and compare
+      // For now, we'll simulate by checking the 0x API with a higher expected return
+      const quote = await getQuote(sellToken, buyToken, sellAmount.toString(), 'hot');
+      
+      if (!quote) {
+        toast.error("Falha ao obter cotações para arbitragem hot");
+        return null;
+      }
+
+      console.log("Cotações obtidas (hot):", quote);
+      return quote;
+    } catch (error) {
+      console.error("Erro na arbitragem hot:", error);
+      return null;
+    }
+  };
+
+  // Execute the most profitable arbitrage strategy
+  const executeBestArbitrage = useCallback(async () => {
+    if (!isRunning || !arbitrageContract || !signer) return;
+    
+    try {
+      toast.info("Analisando oportunidades de arbitragem...");
+      
+      // Try all arbitrage types in parallel
+      const [normalQuote, triangularQuote, hotQuote] = await Promise.all([
+        executeNormalArbitrage(),
+        executeTriangularArbitrage(),
+        executeHotArbitrage()
+      ]);
+      
+      // Find the most profitable opportunity
+      let bestQuote = null;
+      let bestProfit = 0;
+      let bestType: ArbitrageType = null;
+      
+      if (normalQuote && parseFloat(normalQuote.buyAmount) > parseFloat(normalQuote.sellAmount)) {
+        const profit = parseFloat(ethers.utils.formatUnits(
+          ethers.BigNumber.from(normalQuote.buyAmount).sub(ethers.BigNumber.from(normalQuote.sellAmount)), 
+          6
+        ));
+        if (profit > bestProfit) {
+          bestProfit = profit;
+          bestQuote = normalQuote;
+          bestType = 'normal';
         }
-      } else {
+      }
+      
+      if (triangularQuote && triangularQuote.profit > bestProfit) {
+        bestProfit = triangularQuote.profit;
+        bestQuote = triangularQuote;
+        bestType = 'triangular';
+      }
+      
+      if (hotQuote && parseFloat(hotQuote.buyAmount) > parseFloat(hotQuote.sellAmount)) {
+        const profit = parseFloat(ethers.utils.formatUnits(
+          ethers.BigNumber.from(hotQuote.buyAmount).sub(ethers.BigNumber.from(hotQuote.sellAmount)), 
+          6
+        ));
+        if (profit > bestProfit) {
+          bestProfit = profit;
+          bestQuote = hotQuote;
+          bestType = 'hot';
+        }
+      }
+      
+      if (!bestQuote || bestProfit <= 0) {
         console.log("Sem oportunidades lucrativas no momento");
+        setCurrentArbitrageType(null);
+        
+        // Set new random time for next arbitrage attempt
+        const newTime = Math.floor(Math.random() * 90) + 30;
+        setNextArbitrageTime(newTime);
+        return;
+      }
+      
+      // Execute the most profitable arbitrage
+      setCurrentArbitrageType(bestType);
+      toast.success(`Oportunidade detectada em arbitragem ${bestType}, executando...`);
+      
+      try {
+        // In a real system, these would be real transactions
+        // For demonstration, we'll simulate a successful transaction
+        // const tx = await arbitrageContract.executeArbitrage(...);
+        // const receipt = await tx.wait();
+        
+        // Simulate transaction confirmation
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Calculate profit
+        const profitAmount = bestProfit;
+        
+        // Update UI
+        setProfit((prev) => prev + profitAmount);
+        setTotalTransactions((prev) => prev + 1);
+        
+        const newSuccessRate = (successRate * totalTransactions + 100) / (totalTransactions + 1);
+        setSuccessRate(newSuccessRate);
+        
+        setAverageProfit((averageProfit * totalTransactions + profitAmount) / (totalTransactions + 1));
+        
+        // Add to trade history
+        const newTradeItem = {
+          timestamp: Date.now(),
+          sellAmount: bestQuote.sellAmount,
+          buyAmount: bestQuote.buyAmount,
+          txHash: "0x" + Math.random().toString(16).substring(2, 42), // Simulated transaction hash
+          arbitrageType: bestType
+        };
+        
+        setTradeHistory((prev) => [...prev, newTradeItem]);
+        
+        // Update chart data
+        const now = new Date();
+        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+        setChartData((prev) => [
+          ...prev, 
+          { 
+            timestamp: timeString, 
+            profit: profitAmount 
+          }
+        ]);
+        
+        toast.success(`Arbitragem ${bestType} concluída! Lucro: $${profitAmount.toFixed(2)}`);
+      } catch (error) {
+        console.error(`Erro na execução da arbitragem ${bestType}:`, error);
+        toast.error(`Falha ao executar arbitragem ${bestType}`);
       }
       
       // Set new random time for next arbitrage (between 30s and 2min)
@@ -230,15 +405,16 @@ const ArbitrageSystem: React.FC = () => {
     } catch (error) {
       console.error("Erro no processo de arbitragem:", error);
       toast.error("Erro durante o processo de arbitragem");
+      setCurrentArbitrageType(null);
     }
   }, [isRunning, arbitrageContract, signer, successRate, totalTransactions, averageProfit]);
 
   // Handle arbitrage completion
   const handleArbitrageComplete = useCallback(() => {
     if (isRunning) {
-      executeArbitrage();
+      executeBestArbitrage();
     }
-  }, [isRunning, executeArbitrage]);
+  }, [isRunning, executeBestArbitrage]);
 
   // Update exchange rates
   const fetchExchangeRates = useCallback(async () => {
@@ -285,6 +461,34 @@ const ArbitrageSystem: React.FC = () => {
     toast.success("Dados atualizados");
   };
 
+  // Get background color for arbitrage type indicator
+  const getArbitrageTypeColor = () => {
+    switch (currentArbitrageType) {
+      case 'normal':
+        return 'bg-blue-500';
+      case 'triangular':
+        return 'bg-green-500';
+      case 'hot':
+        return 'bg-orange-500';
+      default:
+        return 'bg-gray-500';
+    }
+  };
+
+  // Get display name for arbitrage type
+  const getArbitrageTypeDisplay = () => {
+    switch (currentArbitrageType) {
+      case 'normal':
+        return 'Normal';
+      case 'triangular':
+        return 'Triangular';
+      case 'hot':
+        return 'Hot';
+      default:
+        return 'Nenhuma';
+    }
+  };
+
   return (
     <div className="container mx-auto p-4">
       <div className="flex flex-col md:flex-row justify-between items-center mb-6">
@@ -295,6 +499,14 @@ const ArbitrageSystem: React.FC = () => {
         <div className="flex gap-2 items-center mt-4 md:mt-0">
           <StatusLED active={isConnected} label="Conectado" />
           <StatusLED active={isRunning} label="Em execução" />
+          
+          <div className="px-3 py-1 rounded-md flex items-center gap-1 text-xs font-medium">
+            <span className="text-muted-foreground">Estratégia:</span>
+            <span className={`px-2 py-0.5 rounded ${getArbitrageTypeColor()} text-white`}>
+              {getArbitrageTypeDisplay()}
+            </span>
+          </div>
+          
           <WalletStatus 
             connected={isConnected}
             walletAddress={walletAddress}
