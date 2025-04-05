@@ -1,7 +1,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Wallet, WalletX } from 'lucide-react';
+import { Wallet, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -46,7 +46,7 @@ const WalletStatus: React.FC<WalletStatusProps> = ({
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <WalletX className="w-5 h-5 text-crypto-red" />
+                <XCircle className="w-5 h-5 text-crypto-red" />
                 <span className="text-sm font-medium">Carteira Desconectada</span>
               </div>
             )}
