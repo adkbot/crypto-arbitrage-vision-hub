@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Button } from './ui/button';
+import { ArrowUpIcon, ArrowDownIcon } from 'lucide-react';
 
 interface ArbitrageOpportunity {
   id: string;
@@ -27,6 +28,12 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
   const filteredOpportunities = selectedType === 'all' 
     ? opportunities 
     : opportunities.filter(opp => opp.type === selectedType);
+
+  // Ordenar oportunidades por profit (da maior para a menor)
+  const sortedOpportunities = [...filteredOpportunities].sort((a, b) => b.profit - a.profit);
+  
+  // Pegar as 5 melhores oportunidades
+  const top5Opportunities = sortedOpportunities.slice(0, 5);
 
   // Get border color based on arbitrage type
   const getBorderColor = (type: string) => {
@@ -56,6 +63,20 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
     }
   };
 
+  // Get background color based on arbitrage type for percentage badge
+  const getBackgroundColor = (type: string) => {
+    switch (type) {
+      case 'normal':
+        return 'bg-green-500';
+      case 'triangular':
+        return 'bg-yellow-500';
+      case 'hot':
+        return 'bg-orange-500';
+      default:
+        return 'bg-gray-500';
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -66,7 +87,7 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
       </div>
 
       <div className="relative">
-        <div className="flex space-x-2 mb-4">
+        <div className="flex space-x-2 mb-4 overflow-x-auto pb-2">
           <Button 
             variant={selectedType === 'all' ? 'default' : 'outline'} 
             size="sm"
@@ -102,8 +123,8 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
         </div>
 
         <div className="space-y-3">
-          {filteredOpportunities.length > 0 ? (
-            filteredOpportunities.map((opportunity) => (
+          {top5Opportunities.length > 0 ? (
+            top5Opportunities.map((opportunity) => (
               <div 
                 key={opportunity.id}
                 className={`p-3 border ${getBorderColor(opportunity.type)} rounded-lg bg-background/30 backdrop-blur-sm cursor-pointer hover:bg-background/50 transition-colors`}
@@ -111,7 +132,8 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
               >
                 <div className="flex justify-between items-center">
                   <div className="font-medium">{opportunity.route}</div>
-                  <div className={getTextColor(opportunity.type)}>
+                  <div className={`${getBackgroundColor(opportunity.type)} text-white font-medium px-2 py-0.5 rounded-full flex items-center`}>
+                    {opportunity.profit > 0 ? <ArrowUpIcon className="h-3 w-3 mr-1" /> : <ArrowDownIcon className="h-3 w-3 mr-1" />}
                     {opportunity.profit.toFixed(2)}%
                   </div>
                 </div>
@@ -122,9 +144,22 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
               </div>
             ))
           ) : (
-            <p className="text-center py-4 text-muted-foreground">Nenhuma oportunidade disponível no momento</p>
+            <div className="text-center py-4 text-muted-foreground">
+              <p>Buscando oportunidades em tempo real...</p>
+              <p className="text-xs mt-1">Aguarde enquanto consultamos a API 0x</p>
+            </div>
           )}
         </div>
+        
+        {filteredOpportunities.length > 0 && top5Opportunities.length === 0 && (
+          <p className="text-center py-4 text-muted-foreground">Nenhuma oportunidade disponível no momento</p>
+        )}
+        
+        {filteredOpportunities.length > 5 && (
+          <div className="text-center mt-2 text-xs text-muted-foreground">
+            Mostrando as 5 melhores oportunidades de {filteredOpportunities.length} disponíveis
+          </div>
+        )}
       </div>
     </div>
   );
