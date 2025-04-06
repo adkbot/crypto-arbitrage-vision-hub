@@ -7,6 +7,7 @@ const Index = () => {
       <ArbitrageSystem />
       <div className="container mx-auto mt-6 text-center text-xs text-muted-foreground">
         <p>Este sistema exibe dados de arbitragem em tempo real. Todas as oportunidades e porcentagens são calculadas dinamicamente.</p>
+        <p className="mt-1 text-crypto-green">Dados atualizados a cada 8 segundos</p>
       </div>
     </div>
   );
