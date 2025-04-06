@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Button } from './ui/button';
-import { ArrowUpIcon, ArrowDownIcon } from 'lucide-react';
+import { ArrowUpIcon, ArrowDownIcon, RefreshCw } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
 
@@ -54,6 +54,14 @@ const TRIANGULAR_ROUTES = [
   { from: BNB, to: CAKE, toName: "CAKE", fromName: "BNB" },
 ];
 
+// Normal routes for direct arbitrage
+const NORMAL_ROUTES = [
+  { from: USDT, to: USDC, fromName: "USDT", toName: "USDC" },
+  { from: LINK, to: ETH, fromName: "LINK", toName: "ETH" },
+  { from: ETH, to: USDC, fromName: "ETH", toName: "USDC" },
+  { from: BUSD, to: USDT, fromName: "BUSD", toName: "USDT" },
+];
+
 const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
   opportunities: propOpportunities,
   selectedType,
@@ -63,6 +71,7 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
   const [realTimeOpportunities, setRealTimeOpportunities] = useState<ArbitrageOpportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [refreshing, setRefreshing] = useState(false);
 
   // Function to format timestamp
   const formatTimestamp = () => {
@@ -73,10 +82,15 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
   // Function to get quote from 0x API
   const getQuote = async (sellToken: string, buyToken: string, sellAmount: string) => {
     try {
-      const headers = {
-        "0x-api-key": API_KEY,
+      console.log(`Fetching quote for ${sellToken} -> ${buyToken}`);
+      
+      const headers: any = {
         "0x-version": "v2"
       };
+      
+      if (API_KEY) {
+        headers["0x-api-key"] = API_KEY;
+      }
 
       const params: any = {
         chainId: 1, // Ethereum Mainnet
@@ -88,9 +102,10 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
 
       const response = await axios.get(BASE_0X_URL, { 
         params,
-        headers: API_KEY ? headers : undefined // Only send headers if API key is set
+        headers
       });
       
+      console.log(`Quote received for ${sellToken} -> ${buyToken}:`, response.data);
       return response.data;
     } catch (error) {
       console.error("Error getting quote:", error);
@@ -98,23 +113,34 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
     }
   };
 
+  // Calculate profit from a path of quotes
+  const calculateProfit = (initialAmount: string, finalAmount: string) => {
+    const initial = parseFloat(initialAmount);
+    const final = parseFloat(finalAmount);
+    if (isNaN(initial) || isNaN(final) || initial === 0) return 0;
+    
+    return ((final - initial) / initial) * 100;
+  };
+
   // Fetch real-time arbitrage opportunities
   const fetchRealTimeOpportunities = async () => {
     setIsLoading(true);
+    setRefreshing(true);
     
     try {
+      console.log("Fetching real-time arbitrage opportunities...");
       const opportunities: ArbitrageOpportunity[] = [];
       const timestamp = formatTimestamp();
       
       // Base amount in Wei (1 ETH)
       const sellAmount = "1000000000000000000";
       
-      // Generate triangular arbitrage opportunities
-      // For real implementation, this would be multiple API calls to check for price differences
+      // Generate triangular arbitrage opportunities from real API data
+      console.log("Fetching triangular arbitrage opportunities...");
       for (let i = 0; i < TRIANGULAR_ROUTES.length; i += 3) {
         if (i + 2 < TRIANGULAR_ROUTES.length) {
           try {
-            // Quote for first leg
+            // First leg quote
             const quote1 = await getQuote(
               TRIANGULAR_ROUTES[i].from, 
               TRIANGULAR_ROUTES[i].to, 
@@ -122,23 +148,42 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
             );
             
             if (quote1) {
-              // Calculate profit percentage (simplified for demo)
-              // In a real implementation, you would chain all 3 quotes
-              const profit = 5 + Math.random() * 3; // Simulate 5-8% profit for demo
+              // Second leg quote using the output from first quote
+              const quote2 = await getQuote(
+                TRIANGULAR_ROUTES[i].to,
+                TRIANGULAR_ROUTES[i+1].to,
+                quote1.buyAmount
+              );
               
-              // Create the route representation
-              const route = `${TRIANGULAR_ROUTES[i].fromName} → ${TRIANGULAR_ROUTES[i].toName} → ${TRIANGULAR_ROUTES[i+1].toName} → ${TRIANGULAR_ROUTES[i+2].toName}`;
-              
-              // Determine if this is a hot opportunity
-              const isHot = profit > 7;
-              
-              opportunities.push({
-                id: `tri-${i}-${Date.now()}`,
-                route,
-                profit,
-                timestamp,
-                type: isHot ? 'hot' : 'triangular'
-              });
+              if (quote2) {
+                // Third leg quote using the output from second quote
+                const quote3 = await getQuote(
+                  TRIANGULAR_ROUTES[i+1].to,
+                  TRIANGULAR_ROUTES[i+2].to,
+                  quote2.buyAmount
+                );
+                
+                if (quote3) {
+                  // Calculate real profit
+                  const profitPercentage = calculateProfit(sellAmount, quote3.buyAmount);
+                  
+                  console.log(`Triangular arbitrage: ${TRIANGULAR_ROUTES[i].fromName} -> ${TRIANGULAR_ROUTES[i].toName} -> ${TRIANGULAR_ROUTES[i+1].toName} -> ${TRIANGULAR_ROUTES[i+2].toName}, Profit: ${profitPercentage.toFixed(2)}%`);
+                  
+                  // Create the route representation
+                  const route = `${TRIANGULAR_ROUTES[i].fromName} → ${TRIANGULAR_ROUTES[i].toName} → ${TRIANGULAR_ROUTES[i+1].toName} → ${TRIANGULAR_ROUTES[i+2].toName}`;
+                  
+                  // Determine if this is a hot opportunity based on profit percentage
+                  const isHot = profitPercentage > 6.5;
+                  
+                  opportunities.push({
+                    id: `tri-${i}-${Date.now()}`,
+                    route,
+                    profit: profitPercentage,
+                    timestamp,
+                    type: isHot ? 'hot' : 'triangular'
+                  });
+                }
+              }
             }
           } catch (error) {
             console.error("Error in triangular arbitrage calculation:", error);
@@ -147,39 +192,40 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
       }
       
       // Generate direct (normal) arbitrage opportunities
-      try {
-        const directPairs = [
-          { from: USDT, to: USDC, fromName: "USDT", toName: "USDC" },
-          { from: LINK, to: ETH, fromName: "LINK", toName: "ETH" }
-        ];
-        
-        for (const pair of directPairs) {
+      console.log("Fetching normal arbitrage opportunities...");
+      for (const pair of NORMAL_ROUTES) {
+        try {
           const quoteA = await getQuote(pair.from, pair.to, sellAmount);
           
           if (quoteA) {
-            const profit = 4 + Math.random() * 2; // Simulate 4-6% profit
+            // For normal arbitrage, calculate profit directly
+            const profitPercentage = calculateProfit(sellAmount, quoteA.buyAmount);
+            
+            console.log(`Normal arbitrage: ${pair.fromName} -> ${pair.toName}, Profit: ${profitPercentage.toFixed(2)}%`);
             
             opportunities.push({
               id: `normal-${pair.fromName}-${pair.toName}-${Date.now()}`,
               route: `${pair.fromName} → ${pair.toName}`,
-              profit,
+              profit: profitPercentage,
               timestamp,
               type: 'normal'
             });
           }
+        } catch (error) {
+          console.error("Error in normal arbitrage calculation:", error);
         }
-      } catch (error) {
-        console.error("Error in normal arbitrage calculation:", error);
       }
+      
+      console.log(`Fetched ${opportunities.length} real-time opportunities`);
       
       setRealTimeOpportunities(opportunities);
       setLastUpdated(timestamp);
-      setIsLoading(false);
-      
     } catch (error) {
       console.error("Error fetching real-time opportunities:", error);
       toast.error("Falha ao buscar oportunidades em tempo real");
+    } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -220,20 +266,6 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
         return 'border-orange-500';
       default:
         return 'border-gray-500';
-    }
-  };
-
-  // Get text color based on arbitrage type
-  const getTextColor = (type: string) => {
-    switch (type) {
-      case 'normal':
-        return 'text-green-500';
-      case 'triangular':
-        return 'text-yellow-500';
-      case 'hot':
-        return 'text-orange-500';
-      default:
-        return 'text-gray-500';
     }
   };
 
@@ -305,8 +337,10 @@ const ArbitrageOpportunities: React.FC<ArbitrageOpportunitiesProps> = ({
             variant="outline"
             size="sm"
             onClick={fetchRealTimeOpportunities}
-            className="rounded-full ml-auto"
+            className="rounded-full ml-auto flex items-center gap-1"
+            disabled={refreshing}
           >
+            <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
         </div>
