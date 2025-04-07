@@ -10,7 +10,7 @@ interface ProfitDisplayProps {
 
 const ProfitDisplay: React.FC<ProfitDisplayProps> = ({
   currentProfit,
-  currency = 'USD',
+  currency = 'USDT',
   className
 }) => {
   const [animatedProfit, setAnimatedProfit] = useState(currentProfit);

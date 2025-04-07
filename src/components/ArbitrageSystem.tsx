@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
@@ -28,6 +29,26 @@ const tradeInterval = 5000;
 const POLYGON_USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // USDC on Polygon
 const POLYGON_USDT = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // USDT on Polygon
 const POLYGON_WMATIC = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"; // WMATIC on Polygon
+
+// USDT Contract ABI (Mínimo necessário para obter o saldo)
+const USDT_ABI = [
+  // balanceOf
+  {
+    "constant": true,
+    "inputs": [{ "name": "_owner", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "name": "balance", "type": "uint256" }],
+    "type": "function"
+  },
+  // decimals
+  {
+    "constant": true,
+    "inputs": [],
+    "name": "decimals",
+    "outputs": [{ "name": "", "type": "uint8" }],
+    "type": "function"
+  }
+];
 
 // Arbitrage Types
 type ArbitrageType = 'normal' | 'triangular' | 'hot' | null;
@@ -84,6 +105,7 @@ const ArbitrageSystem: React.FC = () => {
   
   // Contract instance
   const [arbitrageContract, setArbitrageContract] = useState<ethers.Contract | null>(null);
+  const [usdtContract, setUsdtContract] = useState<ethers.Contract | null>(null);
 
   // Get provider and signer
   const getProviderAndSigner = useCallback(async () => {
@@ -91,15 +113,58 @@ const ArbitrageSystem: React.FC = () => {
       if (typeof window !== "undefined" && window.ethereum) {
         const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
         await web3Provider.send("eth_requestAccounts", []); // Request connection to MetaMask
+        
+        // Verificar se estamos na rede Polygon (chainId 137)
+        const network = await web3Provider.getNetwork();
+        if (network.chainId !== 137) {
+          try {
+            // Solicitar mudança para Polygon
+            await window.ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x89' }], // 0x89 é o ID hexadecimal da Polygon
+            });
+          } catch (switchError: any) {
+            // Se a rede não estiver adicionada, adicione-a
+            if (switchError.code === 4902) {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: '0x89',
+                    chainName: 'Polygon Mainnet',
+                    nativeCurrency: {
+                      name: 'MATIC',
+                      symbol: 'MATIC',
+                      decimals: 18
+                    },
+                    rpcUrls: ['https://polygon-rpc.com'],
+                    blockExplorerUrls: ['https://polygonscan.com/']
+                  }
+                ],
+              });
+            } else {
+              throw switchError;
+            }
+          }
+        }
+        
         const web3Signer = web3Provider.getSigner();
         const address = await web3Signer.getAddress();
-        const balance = parseFloat(ethers.utils.formatEther(await web3Provider.getBalance(address)));
+        
+        // Criar instância do contrato USDT
+        const usdtContractInstance = new ethers.Contract(POLYGON_USDT, USDT_ABI, web3Provider);
+        
+        // Obter o saldo em USDT
+        const usdtBalance = await usdtContractInstance.balanceOf(address);
+        const usdtDecimals = await usdtContractInstance.decimals();
+        const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
         
         setProvider(web3Provider);
         setSigner(web3Signer);
         setWalletAddress(address);
-        setWalletBalance(balance);
+        setWalletBalance(formattedUsdtBalance);
         setIsConnected(true);
+        setUsdtContract(usdtContractInstance);
         
         // Initialize contract
         const contract = new ethers.Contract(contractAddress, contractAbi, web3Signer);
@@ -547,11 +612,16 @@ const ArbitrageSystem: React.FC = () => {
   // Refresh data
   const refreshData = async () => {
     toast.info("Atualizando dados...");
-    if (isConnected && signer) {
+    if (isConnected && signer && usdtContract) {
       try {
         const address = await signer.getAddress();
-        const balance = parseFloat(ethers.utils.formatEther(await provider!.getBalance(address)));
-        setWalletBalance(balance);
+        
+        // Obter o saldo atualizado em USDT
+        const usdtBalance = await usdtContract.balanceOf(address);
+        const usdtDecimals = await usdtContract.decimals();
+        const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
+        
+        setWalletBalance(formattedUsdtBalance);
       } catch (error) {
         console.error("Erro ao atualizar saldo:", error);
       }
@@ -617,7 +687,7 @@ const ArbitrageSystem: React.FC = () => {
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <ProfitDisplay currentProfit={profit} currency="USD" className="md:col-span-2" />
+        <ProfitDisplay currentProfit={profit} currency="USDT" className="md:col-span-2" />
         <CountdownTimer 
           initialTime={nextArbitrageTime} 
           onComplete={handleArbitrageComplete} 

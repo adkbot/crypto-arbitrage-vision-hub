@@ -22,6 +22,7 @@ const Index = () => {
         <div className="text-xs text-muted-foreground text-center">
           <p>Este sistema exibe dados de arbitragem em tempo real. Todas as oportunidades e porcentagens são calculadas dinamicamente.</p>
           <p className="mt-1 text-crypto-green">Dados atualizados a cada 8 segundos</p>
+          <p className="mt-1">Todos os valores são exibidos em USDT na rede Polygon</p>
         </div>
       </div>
       

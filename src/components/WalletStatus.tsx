@@ -63,7 +63,7 @@ const WalletStatus: React.FC<WalletStatusProps> = ({
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Saldo</p>
-                <p className="text-base font-medium">{balance.toFixed(4)} ETH</p>
+                <p className="text-base font-medium">{balance.toFixed(4)} USDT</p>
               </div>
               <Button 
                 variant="destructive" 
