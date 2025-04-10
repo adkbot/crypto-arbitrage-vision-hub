@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
@@ -112,8 +113,15 @@ const ArbitrageSystem: React.FC = () => {
   const getProviderAndSigner = useCallback(async () => {
     try {
       if (typeof window !== "undefined" && window.ethereum) {
+        // Reset any previous provider to force a fresh connection
+        setProvider(null);
+        setSigner(null);
+        
+        // Create a new provider instance
         const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-        await web3Provider.send("eth_requestAccounts", []); // Request connection to MetaMask
+        
+        // Request connection to MetaMask - this will trigger a popup if not already connected
+        await web3Provider.send("eth_requestAccounts", []);
         
         // Verificar se estamos na rede Polygon (chainId 137)
         const network = await web3Provider.getNetwork();
@@ -124,6 +132,36 @@ const ArbitrageSystem: React.FC = () => {
               method: 'wallet_switchEthereumChain',
               params: [{ chainId: '0x89' }], // 0x89 é o ID hexadecimal da Polygon
             });
+            
+            // Refresh provider after chain switch to get updated network
+            const updatedProvider = new ethers.providers.Web3Provider(window.ethereum);
+            web3Provider.removeAllListeners();
+            setProvider(updatedProvider);
+            
+            const updatedSigner = updatedProvider.getSigner();
+            setSigner(updatedSigner);
+            
+            const address = await updatedSigner.getAddress();
+            setWalletAddress(address);
+            
+            // Refresh contracts with the updated provider/signer
+            const usdtContractInstance = new ethers.Contract(POLYGON_USDT, USDT_ABI, updatedProvider);
+            setUsdtContract(usdtContractInstance);
+            
+            // Get the USDT balance
+            const usdtBalance = await usdtContractInstance.balanceOf(address);
+            const usdtDecimals = await usdtContractInstance.decimals();
+            const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
+            setWalletBalance(formattedUsdtBalance);
+            
+            // Initialize arbitrage contract
+            const contract = new ethers.Contract(contractAddress, contractAbi, updatedSigner);
+            setArbitrageContract(contract);
+            
+            setIsConnected(true);
+            toast.success("Carteira conectada com sucesso na rede Polygon!");
+            return { web3Provider: updatedProvider, web3Signer: updatedSigner };
+            
           } catch (switchError: any) {
             // Se a rede não estiver adicionada, adicione-a
             if (switchError.code === 4902) {
@@ -143,12 +181,17 @@ const ArbitrageSystem: React.FC = () => {
                   }
                 ],
               });
+              
+              // Try connecting again after adding the network
+              return getProviderAndSigner();
             } else {
+              toast.error("Falha ao mudar para a rede Polygon. Por favor, mude manualmente.");
               throw switchError;
             }
           }
         }
         
+        // If we're already on Polygon, proceed with the connection
         const web3Signer = web3Provider.getSigner();
         const address = await web3Signer.getAddress();
         
@@ -172,6 +215,21 @@ const ArbitrageSystem: React.FC = () => {
         setArbitrageContract(contract);
         
         toast.success("Carteira conectada com sucesso!");
+        
+        // Add listener for account changes
+        window.ethereum.on('accountsChanged', () => {
+          toast.info("Conta da carteira alterada. Reconectando...");
+          disconnectWallet();
+          setTimeout(() => connectWallet(), 500);
+        });
+        
+        // Add listener for chain changes
+        window.ethereum.on('chainChanged', () => {
+          toast.info("Rede alterada. Reconectando...");
+          disconnectWallet();
+          setTimeout(() => connectWallet(), 500);
+        });
+        
         return { web3Provider, web3Signer };
       } else {
         throw new Error("MetaMask não detectada. Use um navegador com MetaMask instalada.");
@@ -188,7 +246,7 @@ const ArbitrageSystem: React.FC = () => {
     await getProviderAndSigner();
   }, [getProviderAndSigner]);
 
-  // Disconnect wallet
+  // Disconnect wallet - make sure to clean up everything
   const disconnectWallet = () => {
     if (isRunning) {
       setIsRunning(false);
@@ -196,13 +254,23 @@ const ArbitrageSystem: React.FC = () => {
     if (isAIAgentActive) {
       setIsAIAgentActive(false);
     }
+    
+    // Remove event listeners if they exist
+    if (window.ethereum) {
+      window.ethereum.removeAllListeners('accountsChanged');
+      window.ethereum.removeAllListeners('chainChanged');
+    }
+    
+    // Clear all wallet-related state
     setProvider(null);
     setSigner(null);
     setWalletAddress('');
     setWalletBalance(0);
     setIsConnected(false);
     setArbitrageContract(null);
+    setUsdtContract(null);
     setCurrentArbitrageType(null);
+    
     toast.info("Carteira desconectada");
   };
 
@@ -552,17 +620,52 @@ const ArbitrageSystem: React.FC = () => {
     }
   }, [isRunning, executeBestArbitrage]);
 
-  // Update exchange rates and generate mock opportunities
+  // Update exchange rates with more significant differences to trigger arbitrage opportunities
   const fetchExchangeRates = useCallback(async () => {
     // In a real application, you would fetch actual rates from exchanges
-    // For now, we'll simulate with semi-realistic data
+    // Here we're simulating with more significant differences to ensure arbitrage opportunities
+    const basePrice = 0.998 + (Math.random() * 0.004); // Base price around 1.0
+    
     const mockExchangeRates = [
-      { exchange: 'Binance', symbol: 'USDC/USDT', price: 0.9998 + (Math.random() * 0.0005), change24h: 0.05 + (Math.random() * 0.2) - 0.1 },
-      { exchange: 'Coinbase', symbol: 'USDC/USDT', price: 0.9997 + (Math.random() * 0.0006), change24h: 0.03 + (Math.random() * 0.15) - 0.05 },
-      { exchange: 'Kraken', symbol: 'USDC/USDT', price: 0.9996 + (Math.random() * 0.0007), change24h: -0.02 + (Math.random() * 0.12) },
-      { exchange: 'FTX', symbol: 'USDC/USDT', price: 0.9995 + (Math.random() * 0.0008), change24h: 0.04 + (Math.random() * 0.18) - 0.09 },
-      { exchange: 'Huobi', symbol: 'USDC/USDT', price: 0.9999 + (Math.random() * 0.0004), change24h: -0.01 + (Math.random() * 0.14) },
-      { exchange: '0x API', symbol: 'USDC/USDT', price: 1.0001 + (Math.random() * 0.0003), change24h: 0.02 + (Math.random() * 0.16) - 0.08 }
+      { 
+        exchange: 'Binance', 
+        symbol: 'USDC/USDT', 
+        price: basePrice, 
+        change24h: 0.05 + (Math.random() * 0.2) - 0.1 
+      },
+      { 
+        exchange: 'Coinbase', 
+        symbol: 'USDC/USDT', 
+        // Create larger price difference (0.1-0.5% difference)
+        price: basePrice + (Math.random() * 0.005), 
+        change24h: 0.03 + (Math.random() * 0.15) - 0.05 
+      },
+      { 
+        exchange: 'Kraken', 
+        symbol: 'USDC/USDT', 
+        // Create significant difference for arbitrage
+        price: basePrice - (Math.random() * 0.004), 
+        change24h: -0.02 + (Math.random() * 0.12) 
+      },
+      { 
+        exchange: 'FTX', 
+        symbol: 'USDC/USDT', 
+        price: basePrice + (Math.random() * 0.003), 
+        change24h: 0.04 + (Math.random() * 0.18) - 0.09 
+      },
+      { 
+        exchange: 'Huobi', 
+        symbol: 'USDC/USDT', 
+        // Occasional high arbitrage opportunity
+        price: (Math.random() > 0.8) ? basePrice + (0.008) : basePrice + (Math.random() * 0.002), 
+        change24h: -0.01 + (Math.random() * 0.14) 
+      },
+      { 
+        exchange: '0x API', 
+        symbol: 'USDC/USDT', 
+        price: basePrice - (Math.random() * 0.003), 
+        change24h: 0.02 + (Math.random() * 0.16) - 0.08 
+      }
     ];
     
     // Generate mock opportunities with the requested color coding by type
@@ -571,42 +674,42 @@ const ArbitrageSystem: React.FC = () => {
         id: '1',
         route: 'DOT → LINK → BNB → DOT',
         profit: 7.29,
-        timestamp: '08:55:31',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'triangular'
       },
       {
         id: '2',
         route: 'CAKE → BUSD → BNB → CAKE',
         profit: 5.13,
-        timestamp: '08:55:55',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'triangular'
       },
       {
         id: '3',
         route: 'USDT → LINK → ETH → USDT',
         profit: 4.96,
-        timestamp: '08:55:33',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'normal'
       },
       {
         id: '4',
         route: 'ETH → LINK → USDT → ETH',
         profit: 7.87,
-        timestamp: '08:55:24',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'hot'
       },
       {
         id: '5',
         route: 'ETH → LINK → BUSD → ETH',
         profit: 7.82,
-        timestamp: '08:55:24',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'triangular'
       },
       {
         id: '6',
         route: 'LINK → BUSD → XRP → LINK',
         profit: 7.31,
-        timestamp: '08:56:56',
+        timestamp: new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'}),
         type: 'hot'
       }
     ];
@@ -618,7 +721,7 @@ const ArbitrageSystem: React.FC = () => {
   // Re-fetch exchange rates periodically
   useEffect(() => {
     fetchExchangeRates();
-    const interval = setInterval(fetchExchangeRates, 15000);
+    const interval = setInterval(fetchExchangeRates, 8000); // Change to 8 seconds to match the specified update time
     return () => clearInterval(interval);
   }, [fetchExchangeRates]);
 
@@ -667,9 +770,10 @@ const ArbitrageSystem: React.FC = () => {
     }, 2000);
   };
 
-  // Refresh data
+  // Refresh data - improved to properly update wallet balance
   const refreshData = async () => {
     toast.info("Atualizando dados...");
+    
     if (isConnected && signer && usdtContract) {
       try {
         const address = await signer.getAddress();
@@ -680,10 +784,13 @@ const ArbitrageSystem: React.FC = () => {
         const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
         
         setWalletBalance(formattedUsdtBalance);
+        toast.success(`Saldo USDT atualizado: ${formattedUsdtBalance}`);
       } catch (error) {
         console.error("Erro ao atualizar saldo:", error);
+        toast.error("Falha ao atualizar saldo. Tente novamente.");
       }
     }
+    
     fetchExchangeRates();
     toast.success("Dados atualizados");
   };

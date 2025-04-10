@@ -32,6 +32,7 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
   const [agentLogs, setAgentLogs] = useState<ArbitrageLog[]>([]);
   const [currentStrategy, setCurrentStrategy] = useState<string | null>(null);
   const [thinkingDots, setThinkingDots] = useState('');
+  const [opportunityCount, setOpportunityCount] = useState(0);
   
   // Add a log entry
   const addLog = (message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info') => {
@@ -84,9 +85,12 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
         return;
       }
       
+      setOpportunityCount(opportunities.length);
+      addLog(`${opportunities.length} oportunidades identificadas`, 'success');
+      
       // Find the best opportunity
       const bestOpportunity = opportunities[0];
-      addLog(`Oportunidade identificada: ${bestOpportunity.route}`, 'success');
+      addLog(`Melhor oportunidade: ${bestOpportunity.route}`, 'success');
       addLog(`Lucro potencial: ${bestOpportunity.profit.toFixed(2)}%`, 'info');
       setCurrentStrategy(bestOpportunity.route);
       
@@ -138,12 +142,12 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
       runAgentLogic();
     }
     
-    // Then run periodically (every 30-60 seconds)
+    // Then run periodically (more frequently to find opportunities)
     const interval = setInterval(() => {
       if (status === 'idle') {
         runAgentLogic();
       }
-    }, 45000 + (Math.random() * 15000)); // 45-60 seconds
+    }, 15000 + (Math.random() * 5000)); // 15-20 seconds
     
     return () => clearInterval(interval);
   }, [isActive, walletConnected, status, runAgentLogic]);
@@ -153,6 +157,10 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
     if (!isActive) {
       setStatus('idle');
       setCurrentStrategy(null);
+    } else {
+      // When activated, add initial log entries
+      addLog('Agente de IA de arbitragem ativado', 'info');
+      addLog('Iniciando análise de mercado', 'info');
     }
   }, [isActive]);
 
@@ -160,6 +168,7 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
   useEffect(() => {
     addLog('Agente de IA de arbitragem inicializado', 'info');
     addLog('Conectado ao sistema principal', 'info');
+    addLog('Aguardando ativação para buscar oportunidades', 'info');
   }, []);
 
   return (
@@ -196,6 +205,12 @@ const AITradingAgent: React.FC<AIAgentProps> = ({
             status === 'executing' ? `Executando arbitragem${thinkingDots}` :
             'Operação concluída'}
           </span>
+          
+          {opportunityCount > 0 && status !== 'idle' && (
+            <span className="text-xs font-medium bg-green-500/20 text-green-600 px-2 py-0.5 rounded-full ml-auto">
+              {opportunityCount} oportunidades
+            </span>
+          )}
         </div>
         
         {/* Current Strategy */}

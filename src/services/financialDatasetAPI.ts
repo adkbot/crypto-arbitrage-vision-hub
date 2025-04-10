@@ -35,7 +35,7 @@ export const fetchArbitrageOpportunities = async (): Promise<ArbitrageOpportunit
     
     // For now, simulate a response with realistic data
     // In production, replace this with actual API calls
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API delay
     
     // Generate realistic trade opportunities
     return generateRealisticArbitrageData();
@@ -107,7 +107,7 @@ export const executeArbitrageTrade = async (
   }
 };
 
-// Generate realistic arbitrage data
+// Generate realistic arbitrage data - improved to always provide opportunities
 const generateRealisticArbitrageData = (): ArbitrageOpportunity[] => {
   // Create a base set of realistic arbitrage opportunities
   const baseOpportunities = [
@@ -145,24 +145,34 @@ const generateRealisticArbitrageData = (): ArbitrageOpportunity[] => {
       baseProfit: 1.8,
       tokens: ['USDT', 'DAI'],
       exchanges: ['Curve', 'Balancer']
-    }
+    },
+    {
+      route: 'USDT → WETH → USDT',
+      type: 'hot' as const,
+      baseProfit: 1.6,
+      tokens: ['USDT', 'WETH'],
+      exchanges: ['Uniswap', 'SushiSwap']
+    },
+    {
+      route: 'USDT → WBTC → USDT',
+      type: 'normal' as const,
+      baseProfit: 0.8,
+      tokens: ['USDT', 'WBTC'],
+      exchanges: ['QuickSwap', 'Balancer']
+    },
   ];
   
-  // Determine how many opportunities to return (0-5)
-  const marketVolatility = Math.sin(Date.now() / 1000000) * 0.5 + 0.5; // 0-1 value that changes slowly
-  const numOpportunities = Math.floor(marketVolatility * 5);
-  
-  if (numOpportunities === 0) return [];
+  // Always generate at least 1-3 opportunities
+  const minOpportunities = Math.floor(Math.random() * 3) + 1;
   
   // Add some randomness to the profits based on current time
   return baseOpportunities
-    .slice(0, numOpportunities)
     .map((opp, index) => {
       const now = Date.now();
       // Create variation in profit based on time and market conditions
       const marketNoise = Math.sin(now / 100000 + index) * 0.5;
-      const randomVariation = (Math.random() * 0.8) - 0.4;
-      const actualProfit = Math.max(0.1, opp.baseProfit + marketNoise + randomVariation);
+      const randomVariation = (Math.random() * 0.8) - 0.3; // less negative bias
+      const actualProfit = Math.max(0.3, opp.baseProfit + marketNoise + randomVariation);
       
       return {
         id: `${opp.type}-${index}-${now}`,
@@ -174,6 +184,8 @@ const generateRealisticArbitrageData = (): ArbitrageOpportunity[] => {
         exchanges: opp.exchanges
       };
     })
+    // Always ensure at least minOpportunities
+    .slice(0, Math.max(minOpportunities, Math.floor(Math.random() * baseOpportunities.length) + 1))
     // Sort by profit (highest first)
     .sort((a, b) => b.profit - a.profit);
 };
