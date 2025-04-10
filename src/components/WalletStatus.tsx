@@ -29,6 +29,27 @@ const WalletStatus: React.FC<WalletStatusProps> = ({
     ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}`
     : '';
 
+  // Handle direct MetaMask connection
+  const handleDirectConnect = async () => {
+    try {
+      if (window.ethereum) {
+        // Force MetaMask to show
+        await window.ethereum.request({
+          method: 'eth_requestAccounts',
+        });
+        
+        // Call the provided onConnect after MetaMask is shown
+        onConnect();
+      } else {
+        toast.error("MetaMask não detectada. Por favor instale a extensão MetaMask.");
+        window.open("https://metamask.io/download.html", "_blank");
+      }
+    } catch (error) {
+      console.error("Erro na conexão direta com MetaMask:", error);
+      toast.error("Falha ao conectar com MetaMask");
+    }
+  };
+
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <Popover>
@@ -79,7 +100,7 @@ const WalletStatus: React.FC<WalletStatusProps> = ({
               <p className="text-sm text-muted-foreground">Conecte sua carteira para iniciar</p>
               <Button 
                 className="w-full bg-crypto-blue hover:bg-crypto-blue/90" 
-                onClick={onConnect}
+                onClick={handleDirectConnect}
                 size="sm"
               >
                 Conectar Carteira

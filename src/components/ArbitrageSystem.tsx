@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
@@ -16,6 +15,7 @@ import AITradingAgent from './AITradingAgent';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { fetchArbitrageOpportunities, executeArbitrageTrade } from '../services/financialDatasetAPI';
 
 // Contract Config
 const contractAddress = "0x0000000000000000000000000000000000000000"; // Replace with your contract address
@@ -113,15 +113,26 @@ const ArbitrageSystem: React.FC = () => {
   const getProviderAndSigner = useCallback(async () => {
     try {
       if (typeof window !== "undefined" && window.ethereum) {
-        // Reset any previous provider to force a fresh connection
+        // Reset state completely to ensure a fresh connection
         setProvider(null);
         setSigner(null);
+        setWalletAddress('');
+        setWalletBalance(0);
+        setIsConnected(false);
+        setArbitrageContract(null);
+        setUsdtContract(null);
+        
+        // Force MetaMask to show the connect popup
+        const accounts = await window.ethereum.request({
+          method: 'eth_requestAccounts',
+        });
+        
+        if (!accounts || accounts.length === 0) {
+          throw new Error("Nenhuma conta MetaMask disponível");
+        }
         
         // Create a new provider instance
         const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
-        
-        // Request connection to MetaMask - this will trigger a popup if not already connected
-        await web3Provider.send("eth_requestAccounts", []);
         
         // Verificar se estamos na rede Polygon (chainId 137)
         const network = await web3Provider.getNetwork();
@@ -133,9 +144,8 @@ const ArbitrageSystem: React.FC = () => {
               params: [{ chainId: '0x89' }], // 0x89 é o ID hexadecimal da Polygon
             });
             
-            // Refresh provider after chain switch to get updated network
+            // Refresh provider after chain switch
             const updatedProvider = new ethers.providers.Web3Provider(window.ethereum);
-            web3Provider.removeAllListeners();
             setProvider(updatedProvider);
             
             const updatedSigner = updatedProvider.getSigner();
@@ -144,11 +154,11 @@ const ArbitrageSystem: React.FC = () => {
             const address = await updatedSigner.getAddress();
             setWalletAddress(address);
             
-            // Refresh contracts with the updated provider/signer
+            // Criar instância do contrato USDT
             const usdtContractInstance = new ethers.Contract(POLYGON_USDT, USDT_ABI, updatedProvider);
             setUsdtContract(usdtContractInstance);
             
-            // Get the USDT balance
+            // Obter o saldo em USDT
             const usdtBalance = await usdtContractInstance.balanceOf(address);
             const usdtDecimals = await usdtContractInstance.decimals();
             const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
@@ -165,26 +175,33 @@ const ArbitrageSystem: React.FC = () => {
           } catch (switchError: any) {
             // Se a rede não estiver adicionada, adicione-a
             if (switchError.code === 4902) {
-              await window.ethereum.request({
-                method: 'wallet_addEthereumChain',
-                params: [
-                  {
-                    chainId: '0x89',
-                    chainName: 'Polygon Mainnet',
-                    nativeCurrency: {
-                      name: 'MATIC',
-                      symbol: 'MATIC',
-                      decimals: 18
-                    },
-                    rpcUrls: ['https://polygon-rpc.com'],
-                    blockExplorerUrls: ['https://polygonscan.com/']
-                  }
-                ],
-              });
-              
-              // Try connecting again after adding the network
-              return getProviderAndSigner();
+              try {
+                await window.ethereum.request({
+                  method: 'wallet_addEthereumChain',
+                  params: [
+                    {
+                      chainId: '0x89',
+                      chainName: 'Polygon Mainnet',
+                      nativeCurrency: {
+                        name: 'MATIC',
+                        symbol: 'MATIC',
+                        decimals: 18
+                      },
+                      rpcUrls: ['https://polygon-rpc.com'],
+                      blockExplorerUrls: ['https://polygonscan.com/']
+                    }
+                  ],
+                });
+                
+                // Try connecting again after adding the network
+                return getProviderAndSigner();
+              } catch (addError) {
+                console.error("Erro ao adicionar rede Polygon:", addError);
+                toast.error("Falha ao adicionar rede Polygon. Por favor, adicione manualmente.");
+                throw addError;
+              }
             } else {
+              console.error("Erro ao mudar para rede Polygon:", switchError);
               toast.error("Falha ao mudar para a rede Polygon. Por favor, mude manualmente.");
               throw switchError;
             }
@@ -215,6 +232,8 @@ const ArbitrageSystem: React.FC = () => {
         setArbitrageContract(contract);
         
         toast.success("Carteira conectada com sucesso!");
+        console.log("Carteira conectada:", address);
+        console.log("Saldo USDT:", formattedUsdtBalance);
         
         // Add listener for account changes
         window.ethereum.on('accountsChanged', () => {
@@ -232,11 +251,12 @@ const ArbitrageSystem: React.FC = () => {
         
         return { web3Provider, web3Signer };
       } else {
-        throw new Error("MetaMask não detectada. Use um navegador com MetaMask instalada.");
+        toast.error("MetaMask não detectada. Use um navegador com MetaMask instalada.");
+        throw new Error("MetaMask não detectada");
       }
     } catch (error) {
       console.error("Erro ao conectar carteira:", error);
-      toast.error("Falha ao conectar carteira. Verifique se a MetaMask está instalada.");
+      toast.error("Falha ao conectar carteira. Verifique se a MetaMask está instalada e desbloqueada.");
       return { web3Provider: null, web3Signer: null };
     }
   }, []);
@@ -247,7 +267,7 @@ const ArbitrageSystem: React.FC = () => {
   }, [getProviderAndSigner]);
 
   // Disconnect wallet - make sure to clean up everything
-  const disconnectWallet = () => {
+  const disconnectWallet = useCallback(() => {
     if (isRunning) {
       setIsRunning(false);
     }
@@ -272,7 +292,8 @@ const ArbitrageSystem: React.FC = () => {
     setCurrentArbitrageType(null);
     
     toast.info("Carteira desconectada");
-  };
+    console.log("Carteira desconectada");
+  }, [isRunning, isAIAgentActive]);
 
   // Toggle running state
   const toggleRunning = () => {
@@ -337,6 +358,33 @@ const ArbitrageSystem: React.FC = () => {
       }
     ]);
   };
+
+  // Function to fetch real opportunities from the financial datasets API
+  const fetchOpportunities = useCallback(async () => {
+    try {
+      if (isConnected) {
+        console.log("Generating dynamic arbitrage opportunities...");
+        const opportunities = await fetchArbitrageOpportunities();
+        setOpportunities(opportunities);
+      }
+    } catch (error) {
+      console.error("Erro ao buscar oportunidades:", error);
+    }
+  }, [isConnected]);
+
+  // Re-fetch exchange rates periodically
+  useEffect(() => {
+    fetchExchangeRates();
+    fetchOpportunities();
+    
+    const rateInterval = setInterval(fetchExchangeRates, 8000);
+    const opportunitiesInterval = setInterval(fetchOpportunities, 8000);
+    
+    return () => {
+      clearInterval(rateInterval);
+      clearInterval(opportunitiesInterval);
+    };
+  }, [fetchExchangeRates, fetchOpportunities]);
 
   // Function to fetch quotes from 0x API v2
   const getQuote = async (sellToken: string, buyToken: string, sellAmount: string, arbitrageType: ArbitrageType = 'normal') => {
@@ -718,61 +766,64 @@ const ArbitrageSystem: React.FC = () => {
     setOpportunities(mockOpportunities);
   }, []);
 
-  // Re-fetch exchange rates periodically
-  useEffect(() => {
-    fetchExchangeRates();
-    const interval = setInterval(fetchExchangeRates, 8000); // Change to 8 seconds to match the specified update time
-    return () => clearInterval(interval);
-  }, [fetchExchangeRates]);
-
-  // Handle selecting arbitrage opportunity between exchanges
-  const handleSelectArbitrage = (fromExchange: string, toExchange: string) => {
-    console.log(`Rota de arbitragem selecionada: ${fromExchange} -> ${toExchange}`);
-    toast.info(`Rota de arbitragem: ${fromExchange} -> ${toExchange}`);
-    // In a real app, this would calculate and display the potential profit
-  };
-
-  // Handle opening details modal for an opportunity
-  const handleOpenDetails = (opportunity: ArbitrageOpportunity) => {
-    setSelectedOpportunity(opportunity);
-    setDetailsModalOpen(true);
-  };
-
-  // Calculate profit details based on selected opportunity and amount
-  const getProfitDetails = useCallback((profit: number) => {
-    const grossProfit = profit;
-    const gasFees = 0.3; // Mock gas fee
-    const otherFees = 0.2; // Other fees
-    const totalFees = gasFees + otherFees;
-    const netProfit = grossProfit - totalFees;
+  // Execute selected arbitrage opportunity with real API
+  const executeSelectedOpportunity = useCallback(async () => {
+    if (!selectedOpportunity || !isConnected) return;
     
-    return {
-      grossProfit,
-      gasFees,
-      totalFees,
-      netProfit
-    };
-  }, []);
-
-  // Execute selected arbitrage opportunity
-  const executeSelectedOpportunity = () => {
-    if (!selectedOpportunity) return;
-    
-    toast.success(`Executando arbitragem ${selectedOpportunity.type} com $${selectedAmount}...`);
+    toast.loading(`Executando arbitragem ${selectedOpportunity.type} com $${selectedAmount}...`);
     setDetailsModalOpen(false);
     
-    // In a real app, this would initiate the actual trade
-    setTimeout(() => {
-      const profitAmount = (selectedOpportunity.profit / 100) * selectedAmount;
-      setProfit(prev => prev + profitAmount);
-      setTotalTransactions(prev => prev + 1);
-      toast.success(`Arbitragem concluída! Lucro: $${profitAmount.toFixed(2)}`);
-    }, 2000);
-  };
+    try {
+      const result = await executeArbitrageTrade(selectedOpportunity.id, selectedAmount);
+      
+      if (result.success && result.finalAmount) {
+        const profitAmount = result.finalAmount - selectedAmount;
+        setProfit(prev => prev + profitAmount);
+        setTotalTransactions(prev => prev + 1);
+        
+        // Update success rate
+        const newSuccessRate = (successRate * totalTransactions + 100) / (totalTransactions + 1);
+        setSuccessRate(newSuccessRate);
+        
+        // Update average profit
+        setAverageProfit((averageProfit * totalTransactions + profitAmount) / (totalTransactions + 1));
+        
+        // Add to trade history
+        const newTradeItem = {
+          timestamp: Date.now(),
+          sellAmount: selectedAmount.toString(),
+          buyAmount: result.finalAmount.toString(),
+          txHash: result.txHash || "0x0",
+          arbitrageType: selectedOpportunity.type
+        };
+        
+        setTradeHistory((prev) => [...prev, newTradeItem]);
+        
+        // Update chart data
+        const now = new Date();
+        const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+        setChartData((prev) => [
+          ...prev, 
+          { 
+            timestamp: timeString, 
+            profit: profitAmount
+          }
+        ]);
+        
+        toast.success(`Arbitragem concluída! Lucro: $${profitAmount.toFixed(2)} USDT`);
+      } else {
+        toast.error(`Falha na arbitragem: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("Erro ao executar arbitragem:", error);
+      toast.error("Erro ao executar arbitragem");
+    }
+  }, [selectedOpportunity, selectedAmount, isConnected, totalTransactions, successRate, averageProfit]);
 
   // Refresh data - improved to properly update wallet balance
-  const refreshData = async () => {
-    toast.info("Atualizando dados...");
+  const refreshData = useCallback(async () => {
+    toast.loading("Atualizando dados...");
     
     if (isConnected && signer && usdtContract) {
       try {
@@ -784,6 +835,7 @@ const ArbitrageSystem: React.FC = () => {
         const formattedUsdtBalance = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
         
         setWalletBalance(formattedUsdtBalance);
+        console.log("Saldo USDT atualizado:", formattedUsdtBalance);
         toast.success(`Saldo USDT atualizado: ${formattedUsdtBalance}`);
       } catch (error) {
         console.error("Erro ao atualizar saldo:", error);
@@ -791,9 +843,9 @@ const ArbitrageSystem: React.FC = () => {
       }
     }
     
-    fetchExchangeRates();
+    await Promise.all([fetchExchangeRates(), fetchOpportunities()]);
     toast.success("Dados atualizados");
-  };
+  }, [isConnected, signer, usdtContract, fetchExchangeRates, fetchOpportunities]);
 
   // Get background color for arbitrage type indicator
   const getArbitrageTypeColor = () => {
