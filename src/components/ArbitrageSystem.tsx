@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
@@ -12,6 +11,7 @@ import ExchangeRates from './ExchangeRates';
 import AmountSelector from './AmountSelector';
 import ArbitrageDetailsModal from './ArbitrageDetailsModal';
 import ArbitrageOpportunities from './ArbitrageOpportunities';
+import AITradingAgent from './AITradingAgent';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -91,6 +91,7 @@ const ArbitrageSystem: React.FC = () => {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [selectedOpportunity, setSelectedOpportunity] = useState<ArbitrageOpportunity | null>(null);
   const [opportunityFilterType, setOpportunityFilterType] = useState('all'); // 'all', 'normal', 'triangular', 'hot'
+  const [isAIAgentActive, setIsAIAgentActive] = useState(false);
   
   // Stats
   const [totalTransactions, setTotalTransactions] = useState(0);
@@ -182,6 +183,93 @@ const ArbitrageSystem: React.FC = () => {
     }
   }, []);
 
+  // Connect wallet
+  const connectWallet = useCallback(async () => {
+    await getProviderAndSigner();
+  }, [getProviderAndSigner]);
+
+  // Disconnect wallet
+  const disconnectWallet = () => {
+    if (isRunning) {
+      setIsRunning(false);
+    }
+    if (isAIAgentActive) {
+      setIsAIAgentActive(false);
+    }
+    setProvider(null);
+    setSigner(null);
+    setWalletAddress('');
+    setWalletBalance(0);
+    setIsConnected(false);
+    setArbitrageContract(null);
+    setCurrentArbitrageType(null);
+    toast.info("Carteira desconectada");
+  };
+
+  // Toggle running state
+  const toggleRunning = () => {
+    if (!isConnected && !isRunning) {
+      toast.error("Por favor, conecte sua carteira primeiro");
+      return;
+    }
+    setIsRunning(!isRunning);
+    toast.info(isRunning ? "Sistema pausado" : "Sistema iniciado");
+  };
+
+  // Toggle AI Agent
+  const toggleAIAgent = () => {
+    if (!isConnected && !isAIAgentActive) {
+      toast.error("Por favor, conecte sua carteira primeiro");
+      return;
+    }
+    setIsAIAgentActive(!isAIAgentActive);
+    toast.info(isAIAgentActive ? "Agente de IA desativado" : "Agente de IA ativado");
+    
+    // If turning on AI agent, turn off manual system
+    if (!isAIAgentActive && isRunning) {
+      setIsRunning(false);
+      toast.info("Sistema manual pausado enquanto o agente de IA está ativo");
+    }
+  };
+
+  // Function to handle arbitrage completion by the AI agent
+  const handleAIArbitrageComplete = (profitAmount: number, type: 'normal' | 'triangular' | 'hot') => {
+    // Update current profit
+    setProfit((prev) => prev + profitAmount);
+    
+    // Update stats
+    setTotalTransactions((prev) => prev + 1);
+    const newSuccessRate = (successRate * totalTransactions + 100) / (totalTransactions + 1);
+    setSuccessRate(newSuccessRate);
+    setAverageProfit((averageProfit * totalTransactions + profitAmount) / (totalTransactions + 1));
+    
+    // Set current type
+    setCurrentArbitrageType(type);
+    
+    // Add to trade history
+    const newTradeItem = {
+      timestamp: Date.now(),
+      sellAmount: selectedAmount.toString(),
+      buyAmount: (selectedAmount + profitAmount).toString(),
+      txHash: "0x" + Math.random().toString(16).substring(2, 42), // Simulated transaction hash
+      arbitrageType: type
+    };
+    
+    setTradeHistory((prev) => [...prev, newTradeItem]);
+    
+    // Update chart data
+    const now = new Date();
+    const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    setChartData((prev) => [
+      ...prev, 
+      { 
+        timestamp: timeString, 
+        profit: profitAmount
+      }
+    ]);
+  };
+
   // Function to fetch quotes from 0x API v2
   const getQuote = async (sellToken: string, buyToken: string, sellAmount: string, arbitrageType: ArbitrageType = 'normal') => {
     try {
@@ -215,36 +303,6 @@ const ArbitrageSystem: React.FC = () => {
       console.error("Erro ao obter cotação:", error);
       return null;
     }
-  };
-
-  // Connect wallet
-  const connectWallet = useCallback(async () => {
-    await getProviderAndSigner();
-  }, [getProviderAndSigner]);
-
-  // Disconnect wallet
-  const disconnectWallet = () => {
-    if (isRunning) {
-      setIsRunning(false);
-    }
-    setProvider(null);
-    setSigner(null);
-    setWalletAddress('');
-    setWalletBalance(0);
-    setIsConnected(false);
-    setArbitrageContract(null);
-    setCurrentArbitrageType(null);
-    toast.info("Carteira desconectada");
-  };
-
-  // Toggle running state
-  const toggleRunning = () => {
-    if (!isConnected && !isRunning) {
-      toast.error("Por favor, conecte sua carteira primeiro");
-      return;
-    }
-    setIsRunning(!isRunning);
-    toast.info(isRunning ? "Sistema pausado" : "Sistema iniciado");
   };
 
   // Execute normal arbitrage (direct swap)
@@ -667,7 +725,7 @@ const ArbitrageSystem: React.FC = () => {
         
         <div className="flex gap-2 items-center mt-4 md:mt-0">
           <StatusLED active={isConnected} label="Conectado" />
-          <StatusLED active={isRunning} label="Em execução" />
+          <StatusLED active={isRunning || isAIAgentActive} label="Em execução" />
           
           <div className="px-3 py-1 rounded-md flex items-center gap-1 text-xs font-medium">
             <span className="text-muted-foreground">Estratégia:</span>
@@ -691,7 +749,18 @@ const ArbitrageSystem: React.FC = () => {
         <CountdownTimer 
           initialTime={nextArbitrageTime} 
           onComplete={handleArbitrageComplete} 
-          isRunning={isRunning}
+          isRunning={isRunning && !isAIAgentActive}
+        />
+      </div>
+      
+      {/* New AI Trading Agent Component */}
+      <div className="mb-6">
+        <AITradingAgent
+          isActive={isAIAgentActive}
+          walletConnected={isConnected}
+          onToggle={toggleAIAgent}
+          selectedAmount={selectedAmount}
+          onArbitrageComplete={handleAIArbitrageComplete}
         />
       </div>
       
@@ -710,7 +779,7 @@ const ArbitrageSystem: React.FC = () => {
           onClick={toggleRunning}
           variant={isRunning ? "destructive" : "default"}
           active={isRunning}
-          disabled={!isConnected}
+          disabled={!isConnected || isAIAgentActive}
         />
         <ControlButton 
           icon={isConnected ? Wifi : WifiOff} 

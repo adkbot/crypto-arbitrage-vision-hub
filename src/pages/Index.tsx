@@ -2,7 +2,7 @@
 import ArbitrageSystem from "@/components/ArbitrageSystem";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "lucide-react";
+import { Calendar, Bot } from "lucide-react";
 import BacktestingModal from "@/components/BacktestingModal";
 
 const Index = () => {
@@ -23,6 +23,9 @@ const Index = () => {
           <p>Este sistema exibe dados de arbitragem em tempo real. Todas as oportunidades e porcentagens são calculadas dinamicamente.</p>
           <p className="mt-1 text-crypto-green">Dados atualizados a cada 8 segundos</p>
           <p className="mt-1">Todos os valores são exibidos em USDT na rede Polygon</p>
+          <p className="mt-2 flex items-center justify-center text-indigo-400">
+            <Bot className="h-3 w-3 mr-1" /> Agente de IA integrado para operações de arbitragem otimizadas
+          </p>
         </div>
       </div>
       
