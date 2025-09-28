@@ -1,0 +1,19 @@
+{
+  "name": "arb-bot",
+  "version": "1.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "serve": "node -r dotenv/config src/server.js",
+    "start:bocis": "node -r dotenv/config src/runners/runBasis.js",
+    "start:tri": "node -r dotenv/config src/runners/runTriangular.js",
+    "backfill": "node -r dotenv/config src/backtest/klinesBack~k.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}
